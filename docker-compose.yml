@@ -2,6 +2,9 @@ services:
   pulsar:
     image: apachepulsar/pulsar:3.2.0
     command: bin/pulsar standalone
+    environment:
+      PULSAR_PREFIX_advertisedAddress: ${PULSAR_ADVERTISED_ADDRESS:-pulsar}
+      PULSAR_PREFIX_webServiceAdvertisedAddress: ${PULSAR_WEB_ADVERTISED_ADDRESS:-pulsar}
     ports:
       - "6650:6650"
       - "8080:8080"
@@ -22,8 +25,9 @@ services:
       pulsar:
         condition: service_healthy
     environment:
-      PULSAR_URL: pulsar://pulsar:6650
-      PULSAR_ADMIN_URL: http://pulsar:8080
+      PULSAR_URL: ${PULSAR_URL:-pulsar://pulsar:6650}
+      PULSAR_ADMIN_URL: ${PULSAR_ADMIN_URL:-http://pulsar:8080}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     ports:
       - "8000:8000"
     networks:
@@ -37,7 +41,7 @@ services:
       pulsar:
         condition: service_healthy
     environment:
-      PULSAR_URL: pulsar://pulsar:6650
+      PULSAR_URL: ${PULSAR_URL:-pulsar://pulsar:6650}
     networks:
       - pulsar-net
 
@@ -48,8 +52,8 @@ services:
     depends_on:
       - api
     environment:
-      VITE_API_BASE_URL: http://localhost:8000
-      VITE_PULSAR_WS_BASE_URL: ws://localhost:8080
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      VITE_PULSAR_WS_BASE_URL: ${VITE_PULSAR_WS_BASE_URL:-ws://localhost:8080}
     ports:
       - "3000:3000"
     networks:

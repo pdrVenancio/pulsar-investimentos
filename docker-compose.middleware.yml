@@ -1,0 +1,16 @@
+services:
+  pulsar:
+    image: apachepulsar/pulsar:3.2.0
+    command: bin/pulsar standalone
+    environment:
+      PULSAR_PREFIX_advertisedAddress: ${PULSAR_ADVERTISED_ADDRESS}
+      PULSAR_PREFIX_webServiceAdvertisedAddress: ${PULSAR_WEB_ADVERTISED_ADDRESS:-${PULSAR_ADVERTISED_ADDRESS}}
+    ports:
+      - "6650:6650"
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/admin/v2/clusters"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s

@@ -21,6 +21,8 @@ Pulsar Admin / WebSocket Proxy: http://localhost:8080
 FrontEnd: http://localhost:3000
 ```
 
+Para rodar em duas ou tres maquinas, veja [DEPLOYMENT.md](./DEPLOYMENT.md).
+
 ## Valores de Regra
 
 Use o campo `rule` para escolher a comparação:

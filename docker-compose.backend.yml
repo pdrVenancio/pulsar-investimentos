@@ -1,0 +1,18 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    environment:
+      PULSAR_URL: ${PULSAR_URL}
+      PULSAR_ADMIN_URL: ${PULSAR_ADMIN_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    ports:
+      - "8000:8000"
+
+  ingestor:
+    build:
+      context: .
+      dockerfile: ingestor/Dockerfile
+    environment:
+      PULSAR_URL: ${PULSAR_URL}
