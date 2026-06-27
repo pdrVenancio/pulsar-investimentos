@@ -1,0 +1,46 @@
+services:
+  pulsar:
+    image: apachepulsar/pulsar:3.2.0
+    command: bin/pulsar standalone
+    ports:
+      - "6650:6650"
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/admin/v2/clusters"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - pulsar-net
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    depends_on:
+      pulsar:
+        condition: service_healthy
+    environment:
+      PULSAR_URL: pulsar://pulsar:6650
+      PULSAR_ADMIN_URL: http://pulsar:8080
+    ports:
+      - "8000:8000"
+    networks:
+      - pulsar-net
+
+  ingestor:
+    build:
+      context: .
+      dockerfile: ingestor/Dockerfile
+    depends_on:
+      pulsar:
+        condition: service_healthy
+    environment:
+      PULSAR_URL: pulsar://pulsar:6650
+    networks:
+      - pulsar-net
+
+networks:
+  pulsar-net:
+    driver: bridge

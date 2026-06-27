@@ -1,0 +1,4 @@
+fastapi
+uvicorn
+pulsar-client
+httpx
