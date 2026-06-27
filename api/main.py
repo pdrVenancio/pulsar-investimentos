@@ -8,6 +8,7 @@ from typing import Literal
 import httpx
 import pulsar
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 
@@ -37,8 +38,11 @@ class SubscriptionResponse(BaseModel):
 
 
 class SubscriptionState(BaseModel):
+    client_id: str
     subscription_id: str
     asset: str
+    rule: str
+    value: float
     function_name: str
     alert_topic: str
 
@@ -55,6 +59,13 @@ class DebugRawQuoteResponse(BaseModel):
 
 
 app = FastAPI(title="Pulsar Asset Alerts")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 subscriptions: dict[str, SubscriptionState] = {}
 pulsar_client: pulsar.Client | None = None
 desired_assets_producer: pulsar.Producer | None = None
@@ -221,8 +232,11 @@ async def create_subscription(request: SubscriptionRequest) -> SubscriptionRespo
         ) from exc
 
     subscriptions[client_id] = SubscriptionState(
+        client_id=client_id,
         subscription_id=subscription_id,
         asset=request.asset,
+        rule=request.rule,
+        value=request.value,
         function_name=function_name,
         alert_topic=alert_topic,
     )
@@ -232,6 +246,11 @@ async def create_subscription(request: SubscriptionRequest) -> SubscriptionRespo
         subscription_id=subscription_id,
         alert_topic=alert_topic,
     )
+
+
+@app.get("/subscriptions", response_model=list[SubscriptionState])
+async def list_subscriptions() -> list[SubscriptionState]:
+    return list(subscriptions.values())
 
 
 @app.delete("/subscriptions/{client_id}", status_code=204)
@@ -294,6 +313,7 @@ async def publish_debug_raw_quote(
         "price": request.price,
         "timestamp": request.timestamp
         or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "source": "debug-api",
     }
     publish_raw_quote(payload)
     return DebugRawQuoteResponse(raw_topic=RAW_OPPORTUNITIES_TOPIC, payload=payload)

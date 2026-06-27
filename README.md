@@ -18,6 +18,7 @@ Com o stack Docker rodando, use estas URLs base no Postman:
 ```text
 HTTP API: http://localhost:8000
 Pulsar Admin / WebSocket Proxy: http://localhost:8080
+FrontEnd: http://localhost:3000
 ```
 
 ## Valores de Regra

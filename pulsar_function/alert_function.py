@@ -96,6 +96,7 @@ class AlertFunction(Function):
                 "target_value": target,
                 "client_id": cfg["client_id"],
                 "triggered_at": data["timestamp"],
+                "source": data.get("source", "unknown"),
             }
             emit_debug(logger, "alert_returned", alert=alert)
             return json.dumps(alert)

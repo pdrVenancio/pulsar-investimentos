@@ -42,6 +42,7 @@ async def poll_asset(asset: str, producer: pulsar.Producer) -> None:
                     "timestamp": datetime.now(timezone.utc)
                     .isoformat()
                     .replace("+00:00", "Z"),
+                    "source": "yfinance-ingestor",
                 }
                 producer.send(json.dumps(payload).encode("utf-8"))
                 print(f"Published raw quote: {payload}", flush=True)
