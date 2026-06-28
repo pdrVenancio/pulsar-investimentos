@@ -436,3 +436,259 @@ select:focus {
     text-align: left;
   }
 }
+
+/* =========================================================
+   Modo B / CEP — adições
+   ========================================================= */
+
+/* Tabs Modo A / Modo B */
+.mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+.mode-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #52606f;
+  font-size: 0.88rem;
+  font-weight: 700;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.mode-tab.active {
+  background: #ffffff;
+  color: #18202a;
+  border-color: #d3dce7;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+}
+
+.mode-tab.active:last-child {
+  color: #7c3aed;
+}
+
+/* Info box CEP */
+.cep-info {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  color: #5b21b6;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+/* Botão CEP (roxo) */
+.primary-button.cep-button {
+  background: #7c3aed;
+}
+
+/* Metric highlight */
+.metric--green svg { color: #16a34a; }
+.metric--red svg { color: #dc2626; }
+
+/* Summary grid — 4 colunas no topo */
+.summary-grid {
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+}
+
+/* Painel CEP global */
+.cep-panel {
+  padding: 16px;
+}
+
+.cep-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  gap: 12px;
+}
+
+.cep-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #7c3aed;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.expand-toggle {
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.cep-alerts-body {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+/* Chips de filtros ativos */
+.cep-active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #ede9fe;
+  border: 1px solid #c4b5fd;
+  color: #6d28d9;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+/* Linhas de alerta CEP */
+.cep-alert-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 62px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid;
+}
+
+.cep-alert--red {
+  background: #fff5f5;
+  border-color: #fecaca;
+}
+
+.cep-alert--green {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.cep-alert-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 120px;
+}
+
+.cep-alert--red .cep-alert-left svg { color: #dc2626; }
+.cep-alert--green .cep-alert-left svg { color: #16a34a; }
+
+.cep-alert-left strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.cep-pattern-label {
+  display: block;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.cep-alert-center {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  justify-content: center;
+}
+
+.sparkline {
+  display: block;
+}
+
+.cep-pct-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 6px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.cep-alert-right {
+  text-align: right;
+}
+
+.cep-last-price {
+  display: block;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #18202a;
+}
+
+.cep-alert-right time {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 0.76rem;
+}
+
+/* Card de filtro CEP */
+.cep-filter-card {
+  border-left: 3px solid #7c3aed;
+}
+
+.rule-pill--cep {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #6d28d9;
+  background: #ede9fe;
+}
+
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: #ede9fe;
+  border: 1px solid #c4b5fd;
+  color: #6d28d9;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+/* Responsivo */
+@media (max-width: 900px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .cep-alert-center {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}

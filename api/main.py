@@ -17,6 +17,8 @@ PULSAR_ADMIN_URL = os.getenv("PULSAR_ADMIN_URL", "http://localhost:8080")
 
 DESIRED_ASSETS_TOPIC = "persistent://public/default/desired-assets"
 RAW_OPPORTUNITIES_TOPIC = "persistent://public/default/raw-opportunities"
+CEP_SUBSCRIPTIONS_TOPIC = "persistent://public/default/cep-subscriptions"
+CEP_ALERTS_TOPIC = "persistent://public/default/alerts-cep"
 FUNCTION_LOG_TOPIC = "persistent://public/default/function-logs"
 FUNCTION_TENANT = "public"
 FUNCTION_NAMESPACE = "default"
@@ -58,6 +60,20 @@ class DebugRawQuoteResponse(BaseModel):
     payload: dict
 
 
+class CEPSubscriptionRequest(BaseModel):
+    asset: str = Field(..., min_length=1)
+    pattern: Literal["consecutive_drops", "consecutive_rises", "pct_drop_window"]
+    count: int = Field(3, ge=2)
+    pct: float = Field(2.0, gt=0)
+    window_secs: int = Field(300, ge=1)
+
+
+class CEPSubscriptionResponse(BaseModel):
+    client_id: str
+    subscription_id: str
+    alert_topic: str
+
+
 app = FastAPI(title="Pulsar Asset Alerts")
 app.add_middleware(
     CORSMiddleware,
@@ -70,6 +86,7 @@ subscriptions: dict[str, SubscriptionState] = {}
 pulsar_client: pulsar.Client | None = None
 desired_assets_producer: pulsar.Producer | None = None
 raw_opportunities_producer: pulsar.Producer | None = None
+cep_subscriptions_producer: pulsar.Producer | None = None
 
 
 def function_endpoint(function_name: str) -> str:
@@ -91,12 +108,22 @@ def get_raw_producer() -> pulsar.Producer:
     return raw_opportunities_producer
 
 
+def get_cep_producer() -> pulsar.Producer:
+    if cep_subscriptions_producer is None:
+        raise RuntimeError("Pulsar CEP producer is not initialized")
+    return cep_subscriptions_producer
+
+
 def publish_asset_demand(message: dict) -> None:
     get_producer().send(json.dumps(message).encode("utf-8"))
 
 
 def publish_raw_quote(message: dict) -> None:
     get_raw_producer().send(json.dumps(message).encode("utf-8"))
+
+
+def publish_cep_subscription(message: dict) -> None:
+    get_cep_producer().send(json.dumps(message).encode("utf-8"))
 
 
 async def create_alert_function(
@@ -182,10 +209,11 @@ async def delete_alert_function(function_name: str) -> None:
 
 @app.on_event("startup")
 def startup() -> None:
-    global pulsar_client, desired_assets_producer, raw_opportunities_producer
+    global pulsar_client, desired_assets_producer, raw_opportunities_producer, cep_subscriptions_producer
     pulsar_client = pulsar.Client(PULSAR_URL)
     desired_assets_producer = pulsar_client.create_producer(DESIRED_ASSETS_TOPIC)
     raw_opportunities_producer = pulsar_client.create_producer(RAW_OPPORTUNITIES_TOPIC)
+    cep_subscriptions_producer = pulsar_client.create_producer(CEP_SUBSCRIPTIONS_TOPIC)
 
 
 @app.on_event("shutdown")
@@ -194,6 +222,8 @@ def shutdown() -> None:
         desired_assets_producer.close()
     if raw_opportunities_producer is not None:
         raw_opportunities_producer.close()
+    if cep_subscriptions_producer is not None:
+        cep_subscriptions_producer.close()
     if pulsar_client is not None:
         pulsar_client.close()
 
@@ -253,6 +283,47 @@ async def list_subscriptions() -> list[SubscriptionState]:
     return list(subscriptions.values())
 
 
+@app.post("/cep-subscriptions", response_model=CEPSubscriptionResponse, status_code=201)
+async def create_cep_subscription(
+    request: CEPSubscriptionRequest,
+) -> CEPSubscriptionResponse:
+    client_id = str(uuid.uuid4())
+    subscription_id = str(uuid.uuid4())
+    asset = request.asset.upper()
+
+    try:
+        publish_cep_subscription(
+            {
+                "action": "subscribe",
+                "client_id": client_id,
+                "subscription_id": subscription_id,
+                "asset": asset,
+                "pattern": request.pattern,
+                "count": request.count,
+                "pct": request.pct,
+                "window_secs": request.window_secs,
+            }
+        )
+        publish_asset_demand(
+            {
+                "action": "subscribe",
+                "asset": asset,
+                "client_id": client_id,
+            }
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to publish CEP subscription: {exc}",
+        ) from exc
+
+    return CEPSubscriptionResponse(
+        client_id=client_id,
+        subscription_id=subscription_id,
+        alert_topic=CEP_ALERTS_TOPIC,
+    )
+
+
 @app.delete("/subscriptions/{client_id}", status_code=204)
 async def delete_subscription(client_id: str) -> None:
     state = subscriptions.get(client_id)
@@ -277,6 +348,36 @@ async def delete_subscription(client_id: str) -> None:
         ) from exc
 
     subscriptions.pop(client_id, None)
+
+
+@app.delete("/cep-subscriptions/{client_id}", status_code=204)
+async def delete_cep_subscription(
+    client_id: str,
+    subscription_id: str | None = None,
+    asset: str | None = None,
+) -> None:
+    cep_subscription_id = subscription_id or client_id
+    try:
+        publish_cep_subscription(
+            {
+                "action": "unsubscribe",
+                "client_id": client_id,
+                "subscription_id": cep_subscription_id,
+            }
+        )
+        if asset:
+            publish_asset_demand(
+                {
+                    "action": "unsubscribe",
+                    "asset": asset.upper(),
+                    "client_id": client_id,
+                }
+            )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to delete CEP subscription: {exc}",
+        ) from exc
 
 
 @app.get("/debug/functions/{client_id}")

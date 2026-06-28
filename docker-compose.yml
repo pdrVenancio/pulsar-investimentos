@@ -1,7 +1,10 @@
 services:
   pulsar:
     image: apachepulsar/pulsar:3.2.0
-    command: bin/pulsar standalone
+    command: >
+      sh -c "bin/apply-config-from-env.py conf/standalone.conf &&
+             bin/apply-config-from-env.py conf/broker.conf &&
+             bin/pulsar standalone"
     environment:
       PULSAR_PREFIX_advertisedAddress: ${PULSAR_ADVERTISED_ADDRESS:-pulsar}
       PULSAR_PREFIX_webServiceAdvertisedAddress: ${PULSAR_WEB_ADVERTISED_ADDRESS:-pulsar}
@@ -42,6 +45,25 @@ services:
         condition: service_healthy
     environment:
       PULSAR_URL: ${PULSAR_URL:-pulsar://pulsar:6650}
+    networks:
+      - pulsar-net
+
+  # Modo B: CEP worker
+  # Consome raw-opportunities e cep-subscriptions via Pulsar nativo
+  # e publica alertas de padrões temporais em alerts-cep
+  cep_flink:
+    build:
+      context: ./cep_flink
+      dockerfile: Dockerfile
+    depends_on:
+      pulsar:
+        condition: service_healthy
+    environment:
+      PULSAR_URL: ${PULSAR_URL:-pulsar://pulsar:6650}
+      RAW_OPPORTUNITIES_TOPIC: persistent://public/default/raw-opportunities
+      CEP_SUBSCRIPTIONS_TOPIC: persistent://public/default/cep-subscriptions
+      CEP_ALERTS_TOPIC: persistent://public/default/alerts-cep
+      GROUP_ID: cep-worker
     networks:
       - pulsar-net
 
