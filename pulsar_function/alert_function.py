@@ -4,8 +4,9 @@ from pulsar import Function
 
 
 def emit_debug(logger, stage, **fields):
-    # Prefixing the log makes it easy to find these entries in the
-    # function-logs topic from Postman.
+    # Adiciono um prefixo às mensagens de log, para ficar mais fácil 
+    # localizar essas entradas no tópico function-logs durante os 
+    # testes.
     payload = {"stage": stage, **fields}
     message = f"ALERT_FUNCTION_DEBUG {json.dumps(payload, default=str)}"
     print(message, flush=True)
@@ -13,8 +14,7 @@ def emit_debug(logger, stage, **fields):
 
 
 def load_user_config(context):
-    # Pulsar Python runtimes expose userConfig differently across versions.
-    # This project runs on Pulsar 3.2.0, where get_user_config() may not exist.
+    # A forma de acessar o userConfig varia entre as versões do runtime Python do Pulsar. 
     if hasattr(context, "get_user_config"):
         return context.get_user_config(), "get_user_config"
 
@@ -36,9 +36,10 @@ class AlertFunction(Function):
         logger = context.get_logger()
         cfg, config_source = load_user_config(context)
 
-        # Every message from raw-opportunities should reach this point. If this
-        # debug entry does not appear, the Function is not consuming the input
-        # topic or is not running.
+        # Todas as mensagens publicadas no tópico raw-opportunities devem 
+        # passar por este trecho do código. Se este log de depuração não 
+        # for exibido, é um indicativo de que a Pulsar Function não está 
+        # lendo o tópico de entrada ou simplesmente não está rodando.
         data = json.loads(input)
         emit_debug(
             logger,
@@ -68,8 +69,9 @@ class AlertFunction(Function):
             emit_debug(logger, "ignored_asset", reason="asset_mismatch")
             return None
 
-        # Convert both values to float before comparing. This avoids accidental
-        # string comparison and makes the debug output show the exact numbers.
+        # Antes de realizar a comparação, converta os dois valores para float. 
+        # Assim, você garante que a comparação será numérica (e não entre textos) 
+        # e que os logs de depuração exibirão os valores corretos.
         price = float(data["price"])
         target = float(cfg["value"])
         rule = cfg["rule"]

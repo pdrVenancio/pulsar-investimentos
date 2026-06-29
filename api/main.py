@@ -245,8 +245,9 @@ async def create_subscription(request: SubscriptionRequest) -> SubscriptionRespo
     )
 
     try:
-        # This tells the ingestor which asset must be polled. Price filtering
-        # stays inside the Pulsar Function, not here.
+        # Essa informação apenas indica ao ingestor qual ativo ele deve consultar 
+        # periodicamente. A lógica de filtrar preços permanece na Pulsar Function,
+        # e não aqui.
         publish_asset_demand(
             {
                 "action": "subscribe",
@@ -333,7 +334,7 @@ async def delete_subscription(client_id: str) -> None:
     await delete_alert_function(state.function_name)
 
     try:
-        # The ingestor removes this client from its in-memory subscriber set.
+        # O componente de ingestão remove esse cliente da lista de inscritos que mantém em memória.
         publish_asset_demand(
             {
                 "action": "unsubscribe",
@@ -407,8 +408,8 @@ async def get_function_debug(client_id: str) -> dict:
 async def publish_debug_raw_quote(
     request: DebugRawQuoteRequest,
 ) -> DebugRawQuoteResponse:
-    # Debug-only Postman helper. It publishes the same raw message shape that
-    # the ingestor normally publishes after reading yFinance.
+    # Este é um endpoint auxiliar usado apenas para depuração. Ele publica exatamente 
+    # a mesma mensagem bruta que o ingestor publicaria após obter os dados do yFinance.
     payload = {
         "asset": request.asset,
         "price": request.price,

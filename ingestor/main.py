@@ -19,8 +19,8 @@ polling_tasks: dict[str, asyncio.Task] = {}
 
 
 async def fetch_last_price(asset: str) -> float:
-    # yFinance is blocking, so it runs in a worker thread to avoid freezing
-    # the asyncio consumer loop.
+    # Como o yFinance realiza operações bloqueantes, ele é executado em uma thread 
+    # separada para não bloquear o loop de eventos do asyncio.
     def read_price() -> float:
         ticker = yf.Ticker(asset)
         price = ticker.fast_info["lastPrice"]
@@ -34,8 +34,10 @@ async def poll_asset(asset: str, producer: pulsar.Producer) -> None:
         while True:
             try:
                 price = await fetch_last_price(asset)
-                # The ingestor publishes only raw market data. It never checks
-                # gte/lte rules; that comparison belongs to the Pulsar Function.
+                # O componente de ingestão apenas recebe e publica os dados brutos 
+                # do mercado. Ele não avalia regras como "maior ou igual" (gte) ou 
+                # "menor ou igual" (lte). Essa lógica de comparação pertence à Pulsar 
+                # Function.
                 payload = {
                     "asset": asset,
                     "price": price,
@@ -62,7 +64,8 @@ def decode_message(message: pulsar.Message) -> dict[str, Any]:
 def ensure_polling(asset: str, producer: pulsar.Producer) -> None:
     task = polling_tasks.get(asset)
     if task is None or task.done():
-        # One polling task per asset, even when many clients subscribe to it.
+        # Existe apenas uma tarefa de consulta (polling) para cada ativo, independentemente 
+        # de quantos clientes estejam inscritos nesse ativo.
         polling_tasks[asset] = asyncio.create_task(poll_asset(asset, producer))
         print(f"Started polling {asset}", flush=True)
 
@@ -85,7 +88,7 @@ async def handle_asset_demand(payload: dict[str, Any], producer: pulsar.Producer
     if action == "subscribe":
         subscribers = active_assets.setdefault(asset, set())
         subscribers.add(client_id)
-        # Multiple clients can share the same asset polling loop.
+        # Diversos clientes podem utilizar a mesma rotina de consulta periódica de um ativo.
         ensure_polling(asset, producer)
         return
 
@@ -96,7 +99,7 @@ async def handle_asset_demand(payload: dict[str, Any], producer: pulsar.Producer
 
         subscribers.discard(client_id)
         if not subscribers:
-            # Stop polling when the last client unsubscribes from this asset.
+            # A consulta periódica ao ativo é interrompida quando o último cliente deixa de estar inscrito nele.
             active_assets.pop(asset, None)
             stop_polling(asset)
         return

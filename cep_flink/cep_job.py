@@ -37,8 +37,13 @@ GROUP_ID = os.getenv("GROUP_ID", "cep-worker")
 
 class CEPState:
     def __init__(self) -> None:
+        # RLock (reentrante) porque process_quote adquire o lock e pode chamar
+        # _match_subscription, que não precisa re-adquirir, mas protege contra
+        # a thread de configuração modificar _subscriptions ao mesmo tempo.
         self._lock = threading.RLock()
         self._subscriptions: dict[str, dict[str, Any]] = {}
+        # deque com maxlen=200 garante consumo de memória fixo por ativo,
+        # independente de quantas cotações chegarem ao longo do tempo.
         self._history: dict[str, deque[tuple[float, float]]] = defaultdict(
             lambda: deque(maxlen=200)
         )
@@ -87,7 +92,11 @@ class CEPState:
 
         event_ts = parse_timestamp(payload.get("timestamp"))
         with self._lock:
+            # Acrescenta a cotação ao histórico do ativo antes de checar padrões,
+            # para que a cotação atual já faça parte da janela de comparação.
             self._history[asset].append((event_ts, numeric_price))
+            # Copia subscriptions e histórico enquanto segura o lock para não
+            # bloquear a thread de configuração durante o matching (que pode ser lento).
             subscriptions = [
                 dict(subscription)
                 for subscription in self._subscriptions.values()
@@ -109,6 +118,8 @@ class CEPState:
         quote: dict[str, Any],
         price: float,
     ) -> dict[str, Any] | None:
+        # Despacha para a função de matching correta com base no padrão cadastrado.
+        # Adicionar um novo padrão = implementar uma nova função match_* aqui.
         pattern = subscription["pattern"]
         if pattern == "consecutive_drops":
             return match_consecutive(subscription, history, quote, price, direction="down")
@@ -149,9 +160,12 @@ def match_consecutive(
     direction: str,
 ) -> dict[str, Any] | None:
     count = subscription["count"]
+    # Aguarda histórico suficiente antes de tentar detectar o padrão.
     if len(history) < count:
         return None
 
+    # Pega somente as últimas `count` cotações e verifica se cada uma é
+    # estritamente menor (down) ou maior (up) que a anterior.
     prices = [entry_price for _, entry_price in history[-count:]]
     if direction == "down":
         matched = all(prices[i] < prices[i - 1] for i in range(1, len(prices)))
@@ -180,11 +194,14 @@ def match_pct_drop(
     window_secs = subscription["window_secs"]
     pct = subscription["pct"]
     now_ts = history[-1][0]
+    # Define o limite inferior da janela de tempo e filtra o histórico.
     cutoff = now_ts - window_secs
     window_prices = [entry_price for ts, entry_price in history if ts >= cutoff]
     if len(window_prices) < 2 or window_prices[0] == 0:
         return None
 
+    # Compara o primeiro preço da janela com o preço atual para calcular a queda.
+    # window_prices[0] é o mais antigo dentro da janela (deque preserva ordem de inserção).
     drop_pct = ((window_prices[0] - price) / window_prices[0]) * 100
     if drop_pct < pct:
         return None
@@ -208,6 +225,8 @@ def consume_subscription_changes(
     state: CEPState,
     stop_event: threading.Event,
 ) -> None:
+    # Thread dedicada a receber mudanças de configuração (subscribe/unsubscribe).
+    # Roda separada da thread de cotações para não bloquear o processamento de preços.
     consumer = client.subscribe(
         CEP_SUBSCRIPTIONS_TOPIC,
         subscription_name=f"{GROUP_ID}-subscription-config",
@@ -255,6 +274,8 @@ def consume_quotes(
 
             try:
                 payload = decode_message(message)
+                # process_quote retorna uma lista — pode haver múltiplos padrões
+                # ativos para o mesmo ativo, cada um gerando seu próprio alerta.
                 for alert in state.process_quote(payload):
                     producer.send(json.dumps(alert).encode("utf-8"))
                     print(f"[CEP] Alert emitted: {alert}", flush=True)
@@ -276,9 +297,13 @@ def main() -> None:
     def request_stop(*_: object) -> None:
         stop_event.set()
 
+    # Graceful shutdown: SIGTERM (Docker stop) e SIGINT (Ctrl+C) sinalizam o
+    # stop_event, que encerra os loops de consumo de forma limpa.
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
 
+    # Thread de configuração roda como daemon: se a thread principal morrer,
+    # ela é encerrada automaticamente pelo runtime.
     config_thread = threading.Thread(
         target=consume_subscription_changes,
         args=(client, state, stop_event),
