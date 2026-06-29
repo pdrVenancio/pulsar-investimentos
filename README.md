@@ -1,45 +1,58 @@
-# Pulsar Investments
+# Pulsar Investimentos
 
-Backend em Python que monitora preços de ativos com yFinance e envia alertas específicos por cliente via Apache Pulsar e Pulsar Functions.
+Backend em Python que monitora preços de ativos com yFinance e envia alertas específicos por cliente via Apache Pulsar. Suporta dois modos de alerta: regras pontuais de preço via Pulsar Functions e detecção de padrões temporais via CEP Worker.
 
 ## Arquitetura
 
-- `api`: serviço FastAPI que cria/remove assinaturas, implanta/remove Pulsar Functions e expõe rotas de debug.
-- `ingestor`: consome `desired-assets`, consulta o yFinance e publica cotações brutas em `raw-opportunities`.
-- `pulsar_function`: recebe cotações brutas, compara com a regra do cliente e retorna alertas para `alerts-{client_id}`.
+- `api`: serviço FastAPI que cria e remove assinaturas, faz deploy de Pulsar Functions via Admin REST API e expõe rotas de debug.
+- `ingestor`: consome o tópico `desired-assets`, consulta o yFinance e publica cotações brutas em `raw-opportunities`. Mantém uma única task de polling por ativo, compartilhada entre todos os clientes que assinam aquele ativo.
+- `pulsar_function`: recebe cotações brutas do `raw-opportunities`, compara com a regra do cliente (gte/lte) e retorna alertas para `alerts-{client_id}`. Uma instância é deployada por cliente em tempo de execução via Admin REST API.
+- `cep_flink`: worker de Complex Event Processing que detecta padrões temporais (quedas consecutivas, altas consecutivas, queda percentual em janela de tempo) e publica alertas em `alerts-cep`.
 - `pulsar`: Apache Pulsar standalone com Admin API e WebSocket proxy.
 
-Não há banco de dados. O estado em tempo de execução é mantido apenas em memória.
+Não há banco de dados. O estado em tempo de execução é mantido apenas em memória e nos próprios tópicos Pulsar.
+
+## Tópicos
+
+```text
+desired-assets        API → ingestor (subscribe/unsubscribe de ativos)
+raw-opportunities     ingestor/debug → Pulsar Functions e CEP Worker
+cep-subscriptions     API → CEP Worker (registro de padrões)
+function-logs         mensagens de debug das Pulsar Functions
+alerts-{client_id}    Pulsar Function → alerta pontual do cliente
+alerts-cep            CEP Worker → alertas de padrão temporal
+```
 
 ## Serviços Locais
 
 Com o stack Docker rodando, use estas URLs base no Postman:
 
 ```text
-HTTP API: http://localhost:8000
-Pulsar Admin / WebSocket Proxy: http://localhost:8080
-FrontEnd: http://localhost:3000
+HTTP API:                    http://localhost:8000
+Pulsar Admin / WS Proxy:     http://localhost:8080
+Frontend:                    http://localhost:3000
 ```
 
-Para rodar em duas ou tres maquinas, veja [DEPLOYMENT.md](./DEPLOYMENT.md).
+Para rodar em duas ou três máquinas, veja [DEPLOYMENT.md](./DEPLOYMENT.md).
 
-## Valores de Regra
+---
 
-Use o campo `rule` para escolher a comparação:
+## Alertas Pontuais (Pulsar Function)
+
+Dispara quando o preço de um ativo cruza um valor fixo definido pelo cliente.
+
+### Valores de Regra
 
 ```text
 lte = menor ou igual
 gte = maior ou igual
 ```
 
-Exemplos:
+### 1. Criar uma Assinatura
 
-```json
-{
-  "asset": "PETR4.SA",
-  "rule": "lte",
-  "value": 38.5
-}
+```text
+POST http://localhost:8000/subscriptions
+Content-Type: application/json
 ```
 
 ```json
@@ -47,32 +60,6 @@ Exemplos:
   "asset": "PETR4.SA",
   "rule": "gte",
   "value": 40.0
-}
-```
-
-## Fluxo de Testes no Postman
-
-### 1. Criar uma Assinatura
-
-Crie uma requisição HTTP no Postman:
-
-```text
-POST http://localhost:8000/subscriptions
-```
-
-Headers:
-
-```text
-Content-Type: application/json
-```
-
-Body:
-
-```json
-{
-  "asset": "PETR4.SA",
-  "rule": "gte",
-  "value": 4.0
 }
 ```
 
@@ -90,16 +77,8 @@ Copie o `client_id` retornado.
 
 ### 2. Verificar o Status da Function
 
-Use esta rota para confirmar que a Pulsar Function foi criada e está em execução:
-
 ```text
 GET http://localhost:8000/debug/functions/{client_id}
-```
-
-Exemplo:
-
-```text
-GET http://localhost:8000/debug/functions/20a4538d-8cc8-4810-8c2f-ee06c729ee36
 ```
 
 Verifique estes campos na resposta:
@@ -116,75 +95,44 @@ Se `runtime_status` contiver erros, a Function não está saudável.
 
 ### 3. Abrir o WebSocket de Alertas do Cliente
 
-Crie uma requisição `WebSocket` no Postman:
-
 ```text
 ws://localhost:8080/ws/v2/consumer/persistent/public/default/alerts-{client_id}/postman-alert-sub
 ```
 
-Exemplo:
-
-```text
-ws://localhost:8080/ws/v2/consumer/persistent/public/default/alerts-20a4538d-8cc8-4810-8c2f-ee06c729ee36/postman-alert-sub
-```
-
-Clique em `Connect`.
-
-Este WebSocket recebe o alerta final retornado pela Pulsar Function.
+Clique em `Connect`. Este WebSocket recebe o alerta final retornado pela Pulsar Function.
 
 ### 4. Abrir o WebSocket de Debug da Function
-
-Crie outra requisição `WebSocket` no Postman:
 
 ```text
 ws://localhost:8080/ws/v2/consumer/persistent/public/default/function-logs/postman-debug-sub
 ```
 
-Clique em `Connect`.
-
-Este WebSocket recebe mensagens de debug da `AlertFunction`, incluindo:
+Este WebSocket recebe os estágios de execução da `AlertFunction`:
 
 ```text
-stage=received
-stage=asset_filter
-stage=comparison
-stage=alert_returned
-stage=no_alert_returned
+stage=received          → mensagem chegou do raw-opportunities
+stage=asset_filter      → comparou ativo recebido com ativo configurado
+stage=ignored_asset     → ativo não corresponde, descartado
+stage=comparison        → comparou price com target
+stage=alert_returned    → regra satisfeita, alerta emitido
+stage=no_alert_returned → ativo correspondeu mas regra não foi satisfeita
 ```
+
+Se você ver `alert_returned` em `function-logs` mas nada em `alerts-{client_id}`, a Function funcionou corretamente — o problema está na URL ou na assinatura do WebSocket.
 
 ### 5. Publicar uma Cotação Bruta Manual
 
-Use esta rota para testar a Function sem aguardar o yFinance:
+Use esta rota para testar a Function sem aguardar o intervalo de polling do yFinance:
 
 ```text
 POST http://localhost:8000/debug/raw-quotes
-```
-
-Headers:
-
-```text
 Content-Type: application/json
 ```
-
-Body:
 
 ```json
 {
   "asset": "PETR4.SA",
   "price": 41.17
-}
-```
-
-Resposta esperada:
-
-```json
-{
-  "raw_topic": "persistent://public/default/raw-opportunities",
-  "payload": {
-    "asset": "PETR4.SA",
-    "price": 41.17,
-    "timestamp": "2026-06-27T14:03:57.963917Z"
-  }
 }
 ```
 
@@ -195,33 +143,85 @@ Após isso, verifique os dois WebSockets:
 
 ### 6. Testar com Polling Real do yFinance
 
-Após criar uma assinatura, o ingestor começa a consultar o yFinance para o ativo solicitado.
-
-O intervalo de polling é de 60 segundos por ativo. Se o preço real retornado pelo yFinance satisfizer a regra, o WebSocket de alertas do cliente receberá um alerta.
-
-Use o WebSocket de debug para confirmar que a Function está recebendo e comparando as cotações reais.
+Após criar uma assinatura, o ingestor começa a consultar o yFinance para o ativo solicitado. O intervalo de polling é de **60 segundos** por ativo. Se o preço retornado satisfizer a regra, o WebSocket de alertas do cliente receberá um alerta.
 
 ### 7. Remover a Assinatura
-
-Crie uma requisição HTTP:
 
 ```text
 DELETE http://localhost:8000/subscriptions/{client_id}
 ```
 
-Exemplo:
+Resposta esperada: `204 No Content`
+
+Remove a Pulsar Function do cliente e instrui o ingestor a cancelar o polling desse ativo (se não houver outros clientes assinando o mesmo ativo).
+
+---
+
+## Alertas de Padrão Temporal (CEP Worker)
+
+Dispara quando o histórico de preços de um ativo exibe um padrão recorrente — sem depender de um valor fixo de threshold.
+
+### Padrões Disponíveis
+
+| Padrão | Descrição | Parâmetros |
+|---|---|---|
+| `consecutive_drops` | N quedas consecutivas de preço | `count` (padrão: 3) |
+| `consecutive_rises` | N altas consecutivas de preço | `count` (padrão: 3) |
+| `pct_drop_window` | Queda percentual dentro de uma janela de tempo | `pct` (padrão: 2.0%), `window_secs` (padrão: 300s) |
+
+### 1. Criar uma Assinatura CEP
 
 ```text
-DELETE http://localhost:8000/subscriptions/20a4538d-8cc8-4810-8c2f-ee06c729ee36
+POST http://localhost:8000/cep-subscriptions
+Content-Type: application/json
+```
+
+Exemplo — 3 quedas consecutivas em PETR4:
+
+```json
+{
+  "asset": "PETR4.SA",
+  "pattern": "consecutive_drops",
+  "count": 3
+}
+```
+
+Exemplo — queda de 2% ou mais nos últimos 5 minutos em VALE3:
+
+```json
+{
+  "asset": "VALE3.SA",
+  "pattern": "pct_drop_window",
+  "pct": 2.0,
+  "window_secs": 300
+}
 ```
 
 Resposta esperada:
 
-```text
-204 No Content
+```json
+{
+  "client_id": "a1b2c3d4-...",
+  "subscription_id": "e5f6g7h8-...",
+  "alert_topic": "persistent://public/default/alerts-cep"
+}
 ```
 
-Isso remove a Pulsar Function do cliente e instrui o ingestor a cancelar a assinatura desse cliente no ativo.
+> Diferente das assinaturas pontuais, todos os alertas CEP chegam no mesmo tópico `alerts-cep`, não em tópicos individuais por cliente.
+
+### 2. Abrir o WebSocket de Alertas CEP
+
+```text
+ws://localhost:8080/ws/v2/consumer/persistent/public/default/alerts-cep/postman-cep-sub
+```
+
+### 3. Remover uma Assinatura CEP
+
+```text
+DELETE http://localhost:8000/cep-subscriptions/{client_id}
+```
+
+---
 
 ## Payloads WebSocket no Postman
 
@@ -231,67 +231,58 @@ As mensagens WebSocket do Pulsar chegam neste formato:
 {
   "messageId": "CA0QDSAAMAE=",
   "payload": "eyJhc3NldCI6ICJQRVRSNC5TQSIsICJwcmljZSI6IDQxLjE3fQ==",
-  "properties": {
-    "__pfn_input_topic__": "persistent://public/default/raw-opportunities"
-  },
   "publishTime": "2026-06-27T14:03:57.972Z",
   "redeliveryCount": 0
 }
 ```
 
-A mensagem real está dentro de `payload`, codificada em Base64. Decodifique `payload` para ver o alerta ou o log de debug.
+O campo `payload` é Base64. Decodifique para ver o conteúdo real.
 
-Payload do alerta do cliente após decodificação Base64:
+Payload de alerta pontual após decodificação:
 
 ```json
 {
   "asset": "PETR4.SA",
   "price": 41.17,
   "rule": "gte",
-  "target_value": 4.0,
+  "target_value": 40.0,
   "client_id": "20a4538d-8cc8-4810-8c2f-ee06c729ee36",
   "triggered_at": "2026-06-27T14:03:57.963917Z"
 }
 ```
 
-Payload de debug da Function após decodificação Base64:
+Payload de alerta CEP após decodificação:
 
-```text
-[2026-06-27 14:03:57 +0000] [INFO]: ALERT_FUNCTION_DEBUG {"stage": "comparison", "price": 41.17, "target": 4.0, "rule": "gte", "gte_result": true, "lte_result": false, "matched": true}
+```json
+{
+  "asset": "PETR4.SA",
+  "client_id": "a1b2c3d4-...",
+  "subscription_id": "e5f6g7h8-...",
+  "last_price": 37.80,
+  "triggered_at": "2026-06-27T14:05:00.000Z",
+  "source": "cep-worker",
+  "pattern": "consecutive_drops",
+  "count": 3,
+  "prices": [38.50, 38.10, 37.80]
+}
 ```
 
-## Significado dos Estágios de Debug
-
-Use o campo `stage` do payload de debug decodificado:
-
-- `received`: a Function recebeu uma mensagem de `raw-opportunities`.
-- `asset_filter`: a Function comparou o ativo recebido com o ativo configurado.
-- `ignored_asset`: o ativo não corresponde, nenhum alerta é retornado.
-- `comparison`: a Function comparou `price` com `target`.
-- `alert_returned`: a regra foi satisfeita e um alerta foi retornado para `alerts-{client_id}`.
-- `no_alert_returned`: o ativo correspondeu, mas a regra não foi satisfeita.
-
-Se você ver `alert_returned` em `function-logs` mas nada em `alerts-{client_id}`, a comparação funcionou corretamente e o problema restante está na URL ou na assinatura do WebSocket do cliente.
-
-## Tópicos Importantes
-
-```text
-desired-assets      API -> demanda de assinaturas do ingestor
-raw-opportunities   ingestor/API de debug -> Pulsar Function
-function-logs       mensagens de debug da Pulsar Function
-alerts-{client_id}  Pulsar Function -> alertas do cliente
-```
+---
 
 ## Resumo das Rotas
 
 ```text
-POST   http://localhost:8000/subscriptions
-GET    http://localhost:8000/debug/functions/{client_id}
-POST   http://localhost:8000/debug/raw-quotes
-DELETE http://localhost:8000/subscriptions/{client_id}
+POST   /subscriptions                    Cria assinatura pontual (Pulsar Function)
+DELETE /subscriptions/{client_id}        Remove assinatura pontual
+GET    /debug/functions/{client_id}      Status da Pulsar Function
+POST   /debug/raw-quotes                 Publica cotação bruta manualmente
+
+POST   /cep-subscriptions               Cria assinatura de padrão temporal (CEP)
+DELETE /cep-subscriptions/{client_id}   Remove assinatura CEP
 ```
 
 ```text
-ws://localhost:8080/ws/v2/consumer/persistent/public/default/function-logs/postman-debug-sub
 ws://localhost:8080/ws/v2/consumer/persistent/public/default/alerts-{client_id}/postman-alert-sub
+ws://localhost:8080/ws/v2/consumer/persistent/public/default/function-logs/postman-debug-sub
+ws://localhost:8080/ws/v2/consumer/persistent/public/default/alerts-cep/postman-cep-sub
 ```
